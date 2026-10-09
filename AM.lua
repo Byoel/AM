@@ -6,6 +6,11 @@ local LOBBY_PLACE_ID = 117949143041402
 local function inLobbyPlace() return game.PlaceId == LOBBY_PLACE_ID end
 
 local CONFIG = {
+    LobbyAction = "Follow named host",
+    LobbyMode = "Event",
+    LobbyMap = "Tokyo Jujutsu High (Event)",
+    LobbyStage = "1",
+    LobbyDifficulty = "Nightmare",
     ScriptURL = "", -- Raw HTTPS URL serving this entire Lua file
     HostUsername = "", -- Actual username, not DisplayName
     RoomName = "", -- Exact lobby identifier expected by the server
@@ -324,24 +329,114 @@ task.spawn(function()
 end)
 
 -- LOBBY: host creates once; guests retry explicit join failures while enabled.
-local rewards = {
-    Items = {
-        { Chance = 40, Min = 1, Max = 5, Id = "CursedFragment" },
-        { Chance = 100, Min = 1, Max = 1, Id = "SukunaEvo" },
-        { Chance = 5, Min = 1, Max = 1, Id = "YutaEvo" },
-        { Chance = 100, Min = 1, Max = 2, Id = "Fruit_3" },
-    },
-    Gems = 40, Coins = 20,
-    Units = {},
+-- Map IDs and mode spellings are copied exactly from the supplied requests.
+local modes = {"Event", "Mysterios", "Story"}
+local modeDefinitions = {
+    Event = { maxStage = 3, difficulties = {"Nightmare"}, maps = {
+        { name = "Tokyo Jujutsu High (Event)", id = "CursedAcademy" },
+    } },
+    Mysterios = { maxStage = 3, difficulties = {"Normal", "Hard", "Nightmare"}, maps = {
+        { name = "Namek World" },
+        { name = "Kirigakure Village" },
+        { name = "Cursed Shopping Mall", requestName = "Cursed Mall", id = "CursedMallMyterious" },
+        { name = "Valhalla Arena" },
+    } },
+    Story = { maxStage = 5, difficulties = {"Normal", "Hard", "Nightmare"}, maps = {
+        { name = "Namek World", id = "GreenForest" },
+        { name = "Kirigakure Village" },
+        { name = "Cursed Shopping Mall" },
+        { name = "Valhalla Arena" },
+    } },
 }
-for _, entry in ipairs({ {"Normal", 0.0025}, {"Hard", 0.05}, {"Nightmare", 0.25} }) do
-    table.insert(rewards.Units, {
-        PityMax = 2, Id = "unit_005", ShinyChance = 100,
-        Difficulty = {entry[1]}, IsBlack = true, Chance = entry[2],
-        Max = 1, PityMin = 1, Min = 1,
-    })
+local function contains(list, value)
+    for _, entry in ipairs(list) do if entry == value then return true end end
+    return false
 end
-
+local lobbyActions = {"Follow named host", "Create my own lobby", "Join named room"}
+local function normalizeStage(config)
+    if not contains(lobbyActions, config.LobbyAction) then config.LobbyAction = "Follow named host" end
+    if config.LobbyMode == "Mysterios" and config.LobbyMap == "Cursed Mall" then
+        config.LobbyMap = "Cursed Shopping Mall"
+    end
+    local definition = modeDefinitions[config.LobbyMode]
+    if not definition then config.LobbyMode = "Event"; definition = modeDefinitions.Event end
+    local mapFound = false
+    for _, map in ipairs(definition.maps) do if map.name == config.LobbyMap then mapFound = true end end
+    if not mapFound then config.LobbyMap = definition.maps[1].name end
+    local stage = tonumber(config.LobbyStage)
+    if not stage or stage ~= math.floor(stage) or stage < 1 or stage > definition.maxStage then stage = 1 end
+    config.LobbyStage = tostring(stage)
+    if not contains(definition.difficulties, config.LobbyDifficulty) then
+        config.LobbyDifficulty = definition.difficulties[1]
+    end
+end
+local syncingStages = false
+local function syncStageControls()
+    normalizeStage(CONFIG)
+    syncingStages = true
+    local definition = modeDefinitions[CONFIG.LobbyMode]
+    local mapNames, stages = {}, {}
+    for _, map in ipairs(definition.maps) do table.insert(mapNames, map.name) end
+    for n = 1, definition.maxStage do table.insert(stages, tostring(n)) end
+    configControls.LobbyMode:Set(CONFIG.LobbyMode, true)
+    configControls.LobbyMap:Refresh(mapNames)
+    configControls.LobbyMap:Set(CONFIG.LobbyMap, true)
+    configControls.LobbyStage:Refresh(stages)
+    configControls.LobbyStage:Set(CONFIG.LobbyStage, true)
+    configControls.LobbyDifficulty:Refresh(definition.difficulties)
+    configControls.LobbyDifficulty:Set(CONFIG.LobbyDifficulty, true)
+    syncingStages = false
+end
+local function selectionValue(value)
+    return type(value) == "table" and value[1] or value
+end
+lobby:CreateSection({ name = "Stage selection" })
+lobby:CreateText({ text = "Choose Mode, Map, Stage and Difficulty while Lobby is OFF. Event/Mysterios: 1–3; Story: 1–5. Selections save per account. Reward data is sent as an empty table (server acceptance unverified). New maps need their Start request before auto-start is available." })
+configControls.LobbyMode = lobby:CreateDropdown({ name = "Mode", options = modes,
+    value = CONFIG.LobbyMode, forgetState = true, callback = function(value)
+        if syncingStages then return end
+        value = selectionValue(value)
+        if modeDefinitions[value] then CONFIG.LobbyMode = value; syncStageControls(); queueSave() end
+    end })
+configControls.LobbyMap = lobby:CreateDropdown({ name = "Map", options = {CONFIG.LobbyMap},
+    value = CONFIG.LobbyMap, forgetState = true, callback = function(value)
+        if syncingStages then return end
+        CONFIG.LobbyMap = selectionValue(value); normalizeStage(CONFIG); queueSave()
+    end })
+configControls.LobbyStage = lobby:CreateDropdown({ name = "Stage", options = {"1"},
+    value = CONFIG.LobbyStage, forgetState = true, callback = function(value)
+        if syncingStages then return end
+        CONFIG.LobbyStage = selectionValue(value); normalizeStage(CONFIG); queueSave()
+    end })
+configControls.LobbyDifficulty = lobby:CreateDropdown({ name = "Difficulty", options = {"Nightmare"},
+    value = CONFIG.LobbyDifficulty, forgetState = true, callback = function(value)
+        if syncingStages then return end
+        CONFIG.LobbyDifficulty = selectionValue(value); normalizeStage(CONFIG); queueSave()
+    end })
+syncStageControls()
+local function selectedStageSnapshot()
+    normalizeStage(CONFIG)
+    local definition = modeDefinitions[CONFIG.LobbyMode]
+    local mapId, requestName
+    for _, map in ipairs(definition.maps) do
+        if map.name == CONFIG.LobbyMap then mapId, requestName = map.id, map.requestName or map.name end
+    end
+    local selected = { name = requestName, map = mapId, mode = CONFIG.LobbyMode,
+        stage = tonumber(CONFIG.LobbyStage), difficulty = CONFIG.LobbyDifficulty }
+    if selected.mode == "Event" and selected.map == "CursedAcademy"
+        and selected.difficulty == "Nightmare" then
+        selected.startArguments = {97246719761307, "Event", "CursedAcademy", selected.stage, selected.difficulty}
+    end
+    return selected
+end
+lobby:CreateText({ name = "Map availability", text = "Map names from your screenshots are listed. Working IDs supplied: Story/Namek World, Mysterios/Cursed Shopping Mall, Event/Tokyo. Other maps need their internal IDs before creation. Locked maps still require game unlocks." })
+lobby:CreateSection({ name = "Lobby action" })
+configControls.LobbyAction = lobby:CreateDropdown({ name = "Lobby action", options = lobbyActions,
+    value = CONFIG.LobbyAction, forgetState = true, callback = function(value)
+        value = selectionValue(value)
+        if contains(lobbyActions, value) then CONFIG.LobbyAction = value; queueSave() end
+    end })
+lobby:CreateText({ text = "Follow named host: that username creates; everyone else joins. Create my own lobby: this account creates regardless of username. Join named room: this account only joins. Select while Lobby is OFF, then enable. Saved per account." })
 lobby:CreateSection({ name = "Host and room" })
 lobby:CreateText({ text = "First completes a purchase pass for selected items with enabled currencies. Host then creates/configures, waits 5 seconds, and starts. Other clients wait 1.5 seconds and retry failed joins every 1.5 seconds while ON. Delays begin on each client; no membership check. Edit settings while OFF, then enable." })
 configControls.HostUsername = lobby:CreateInput({ name = "Host username", value = CONFIG.HostUsername, forgetState = true,
@@ -378,10 +473,21 @@ lobbyControl = toggle(lobby, "Enable create / join / delayed start", function(va
         reject("Previous lobby request is still pending. Try again once it returns.")
         return
     end
+    local selectedStage = selectedStageSnapshot()
     local host, room = CONFIG.HostUsername, CONFIG.RoomName
-    local isHost = player.Name:lower() == host:lower()
-    if host == "" or host == "XXX" or (not isHost and (room == "" or room:lower() == "xxx_room")) then
-        reject("Enter the real host username and room identifier first.")
+    local isHost = CONFIG.LobbyAction == "Create my own lobby"
+        or (CONFIG.LobbyAction == "Follow named host" and player.Name:lower() == host:lower())
+    if CONFIG.LobbyAction == "Follow named host" and (host == "" or host == "XXX") then
+        reject("Enter the host username, or select Create my own lobby.")
+        return
+    end
+    if not isHost and (room == "" or room:lower() == "xxx_room") then
+        reject("Enter the room identifier to join.")
+        return
+    end
+    if isHost and not selectedStage.map then
+        reject("Missing internal map ID for " .. CONFIG.LobbyMode .. " / " .. CONFIG.LobbyMap
+            .. ". Supply its UpdateLobbySettings request first.")
         return
     end
     local joinDelay, startDelay = CONFIG.JoinDelay, CONFIG.StartDelay
@@ -405,11 +511,17 @@ lobbyControl = toggle(lobby, "Enable create / join / delayed start", function(va
                 if not alive() or not active() then return end
                 if result == false then error("Server returned false for Create") end
                 remote("Remotes", "UpdateLobbySettings", "RemoteEvent"):FireServer(
-                    "Tokyo Jujutsu High (Event)", 1, rewards, "Nightmare", "CursedAcademy", "Event")
+                    selectedStage.name, selectedStage.stage, {},
+                    selectedStage.difficulty, selectedStage.map, selectedStage.mode)
+                if not selectedStage.startArguments then
+                    status(lobbyStatus, selectedStage.name .. " Stage " .. selectedStage.stage
+                        .. " settings sent. Use the game's Start button; auto-start request not configured.")
+                    return
+                end
                 status(lobbyStatus, "Settings sent; starting in " .. startDelay .. " seconds")
                 if not waitWhile(startDelay, active) then return end
                 remote("Remotes", "TeleportRequest", "RemoteEvent"):FireServer(
-                    97246719761307, "Event", "CursedAcademy", 1, "Nightmare")
+                    table.unpack(selectedStage.startArguments))
                 status(lobbyStatus, "Start request sent; toggle OFF/ON for another attempt")
             else
                 status(lobbyStatus, "Joining in " .. joinDelay .. " seconds...")
@@ -644,6 +756,12 @@ local function validateSettings(data)
         end
         result.config[key] = value
     end
+    -- Migrate the previous two-preset save format.
+    if data.config.LobbyMode == nil and data.config.StagePreset == "Cursed Mall — Stage 3" then
+        result.config.LobbyMode, result.config.LobbyMap = "Mysterios", "Cursed Mall"
+        result.config.LobbyStage, result.config.LobbyDifficulty = "3", "Nightmare"
+    end
+    normalizeStage(result.config)
     for _, item in ipairs(items) do
         result.items[item.id] = type(data.items) == "table" and data.items[item.id] == true
     end
@@ -710,8 +828,11 @@ local function loadSettings()
     disableAll()
     for key, value in pairs(data.config) do
         CONFIG[key] = value
-        configControls[key]:Set(value, true)
+        if key ~= "LobbyMode" and key ~= "LobbyMap" and key ~= "LobbyStage" and key ~= "LobbyDifficulty" then
+            configControls[key]:Set(value, true)
+        end
     end
+    syncStageControls()
     for _, item in ipairs(items) do
         item.enabled = data.items[item.id]
         selectedItems[item.id] = item.enabled
