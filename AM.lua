@@ -7,8 +7,8 @@ local function inLobbyPlace() return game.PlaceId == LOBBY_PLACE_ID end
 
 local CONFIG = {
     ScriptURL = "", -- Raw HTTPS URL serving this entire Lua file
-    HostUsername = "ILY_Byeol", -- Actual username, not DisplayName
-    RoomName = "ILY_Byeol_Room", -- Exact lobby identifier expected by the server
+    HostUsername = "", -- Actual username, not DisplayName
+    RoomName = "", -- Exact lobby identifier expected by the server
     BuyInterval = 5, -- Seconds after each complete purchase pass
     JoinDelay = 1.5,
     StartDelay = 5,
