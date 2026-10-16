@@ -15,7 +15,7 @@ if not fileName then
     return
 end
 
-local BASE = "https://raw.githubusercontent.com/Byoel/AM/refs/heads/main/"
+local BASE = "https://raw.githubusercontent.com/Byoel/Games/refs/heads/main/"
 local env = (getgenv and getgenv()) or _G
 if env.AMLoaderBusy then
     warn("[Deggy HUB] The script is already loading.")
